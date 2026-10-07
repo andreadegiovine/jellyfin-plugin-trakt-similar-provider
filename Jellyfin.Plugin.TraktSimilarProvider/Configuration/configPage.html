@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="utf-8">
+    <title>Trakt Similar Provider</title>
+</head>
+<body>
+    <div id="TraktSimilarProviderConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select">
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="TraktSimilarProviderConfigForm">
+                    <div class="verticalSection">
+                        <h2>Stato</h2>
+                        <div id="statusMessage" class="fieldDescription"></div>
+                        <div class="fieldDescription">
+                            Il fornitore "Trakt" per il carosello Simili (film e serie) funziona
+                            sempre, indipendentemente da questa pagina: usa dati pubblici di
+                            Trakt.tv. Le impostazioni qui sotto servono solo per i Suggerimenti
+                            personalizzati, che richiedono un account Trakt collegato.
+                        </div>
+                    </div>
+
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="SelectedJellyfinUserId">Utente Trakt da usare per i Suggerimenti personalizzati</label>
+                        <select is="emby-select" id="SelectedJellyfinUserId" name="SelectedJellyfinUserId" class="emby-select-withcolor emby-select">
+                            <option value="00000000-0000-0000-0000-000000000000">Nessuno (Suggerimenti disabilitati)</option>
+                        </select>
+                        <div class="fieldDescription">
+                            Elenco popolato dagli utenti Jellyfin risultanti collegati a un
+                            account Trakt nel plugin ufficiale "Trakt".
+                        </div>
+                    </div>
+
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="WatchNowFilter">Filtro disponibilità streaming (watchnow)</label>
+                        <select is="emby-select" id="WatchNowFilter" name="WatchNowFilter" class="emby-select-withcolor emby-select">
+                            <option value="None">Nessuno</option>
+                            <option value="Favorites">Servizi preferiti dell'utente (favorites)</option>
+                            <option value="Any">Qualsiasi servizio nel proprio paese (any)</option>
+                            <option value="AnyAll">Qualsiasi servizio in qualsiasi paese (any_all)</option>
+                            <option value="Free">Gratuiti nel proprio paese (free)</option>
+                        </select>
+                    </div>
+
+                    <div class="verticalSection">
+                        <h2>Altre impostazioni</h2>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="MaxItemsPerRequest">Numero massimo di titoli per richiesta</label>
+                            <input id="MaxItemsPerRequest" name="MaxItemsPerRequest" type="number" is="emby-input" min="1" max="50" />
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="SimilarItemsCacheDays">Durata cache (giorni) per "Simili"</label>
+                            <input id="SimilarItemsCacheDays" name="SimilarItemsCacheDays" type="number" is="emby-input" min="0" />
+                            <div class="fieldDescription">0 per disabilitare la cache di Jellyfin per questo fornitore.</div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="RecommendationsCacheHours">Durata cache (ore) per i Suggerimenti</label>
+                            <input id="RecommendationsCacheHours" name="RecommendationsCacheHours" type="number" is="emby-input" min="1" />
+                        </div>
+                    </div>
+
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                            <span>Salva</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <script type="text/javascript">
+            var TraktSimilarProviderConfig = {
+                pluginUniqueId: 'a3f1c9d4-7e2b-4a6f-9c1d-5b8e2f0a6c3d'
+            };
+
+            function traktSimilarProviderLoadStatus() {
+                var statusEl = document.querySelector('#statusMessage');
+                var select = document.querySelector('#SelectedJellyfinUserId');
+                statusEl.textContent = 'Verifica in corso...';
+
+                ApiClient.ajax({
+                    url: ApiClient.getUrl('Plugins/TraktSimilarProvider/Status'),
+                    type: 'GET',
+                    dataType: 'json'
+                }).then(function (status) {
+                    statusEl.textContent = status.OfficialTraktPluginAvailable
+                        ? 'Plugin Trakt ufficiale: rilevato e attivo.'
+                        : 'Plugin Trakt ufficiale: non rilevato o non attivo. Il fornitore "Simili" continua a funzionare (dati pubblici); i Suggerimenti personalizzati no.';
+
+                    var currentValue = select.value;
+                    while (select.options.length > 1) {
+                        select.remove(1);
+                    }
+
+                    (status.LinkedUsers || []).forEach(function (user) {
+                        var option = document.createElement('option');
+                        option.value = user.Id;
+                        option.textContent = user.Name;
+                        select.appendChild(option);
+                    });
+
+                    select.value = currentValue;
+                }).catch(function () {
+                    statusEl.textContent = 'Impossibile verificare lo stato del plugin Trakt ufficiale.';
+                });
+            }
+
+            document.querySelector('#TraktSimilarProviderConfigPage')
+                .addEventListener('pageshow', function () {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(TraktSimilarProviderConfig.pluginUniqueId).then(function (config) {
+                        document.querySelector('#WatchNowFilter').value = config.WatchNowFilter;
+                        document.querySelector('#MaxItemsPerRequest').value = config.MaxItemsPerRequest;
+                        document.querySelector('#SimilarItemsCacheDays').value = config.SimilarItemsCacheDays;
+                        document.querySelector('#RecommendationsCacheHours').value = config.RecommendationsCacheHours;
+                        document.querySelector('#SelectedJellyfinUserId').value = config.SelectedJellyfinUserId;
+                        Dashboard.hideLoadingMsg();
+                    });
+                    traktSimilarProviderLoadStatus();
+                });
+
+            document.querySelector('#TraktSimilarProviderConfigForm')
+                .addEventListener('submit', function (e) {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(TraktSimilarProviderConfig.pluginUniqueId).then(function (config) {
+                        config.SelectedJellyfinUserId = document.querySelector('#SelectedJellyfinUserId').value;
+                        config.WatchNowFilter = document.querySelector('#WatchNowFilter').value;
+                        config.MaxItemsPerRequest = parseInt(document.querySelector('#MaxItemsPerRequest').value, 10);
+                        config.SimilarItemsCacheDays = parseInt(document.querySelector('#SimilarItemsCacheDays').value, 10);
+                        config.RecommendationsCacheHours = parseInt(document.querySelector('#RecommendationsCacheHours').value, 10);
+                        ApiClient.updatePluginConfiguration(TraktSimilarProviderConfig.pluginUniqueId, config).then(function (result) {
+                            Dashboard.processPluginConfigurationUpdateResult(result);
+                            traktSimilarProviderLoadStatus();
+                        });
+                    });
+
+                    e.preventDefault();
+                    return false;
+                });
+        </script>
+    </div>
+</body>
+</html>

@@ -1,0 +1,24 @@
+name: "🏗️ Build Plugin"
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/*.md"
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "**/*.md"
+  workflow_dispatch:
+
+jobs:
+  call:
+    # Stesso workflow riusabile usato dai plugin ufficiali Jellyfin e da Jellyfin.Xtream
+    # (verificato: github.com/Kevinjil/Jellyfin.Xtream/blob/master/.github/workflows/publish.yaml),
+    # qui solo per la verifica di build su push/PR, senza pubblicare nulla.
+    uses: jellyfin/jellyfin-meta-plugins/.github/workflows/build.yaml@master
+    with:
+      dotnet-version: "10.0.*"
+      dotnet-target: "net10.0"
