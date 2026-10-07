@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 
 namespace Jellyfin.Plugin.TraktSimilarProvider.Api;
@@ -17,20 +16,4 @@ public sealed class TraktSimilarProviderStatusDto
     /// Gets gli utenti Jellyfin risultanti collegati a un account Trakt nel plugin ufficiale.
     /// </summary>
     public required IReadOnlyList<LinkedUserDto> LinkedUsers { get; init; }
-}
-
-/// <summary>
-/// Un utente Jellyfin collegato a un account Trakt.
-/// </summary>
-public sealed class LinkedUserDto
-{
-    /// <summary>
-    /// Gets l'id dell'utente Jellyfin.
-    /// </summary>
-    public required Guid Id { get; init; }
-
-    /// <summary>
-    /// Gets il nome dell'utente Jellyfin.
-    /// </summary>
-    public required string Name { get; init; }
 }

@@ -113,7 +113,7 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
                     return Array.Empty<TraktTitleDto>();
                 }
 
-                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
                 var result = await JsonSerializer.DeserializeAsync<List<TraktTitleDto>>(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
                 return result ?? [];
             }
