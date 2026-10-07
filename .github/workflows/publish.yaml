@@ -39,6 +39,10 @@ jobs:
 
   generate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
     needs:
       - upload
     steps:
