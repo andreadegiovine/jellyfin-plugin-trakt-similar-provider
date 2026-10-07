@@ -1,0 +1,10 @@
+[
+  {
+    "guid": "a3f1c9d4-7e2b-4a6f-9c1d-5b8e2f0a6c3d",
+    "name": "Trakt Similar Provider",
+    "description": "Provides similar movie and show recommendations using the Trakt API for Jellyfin.",
+    "overview": "Trakt Similar Provider plugin for Jellyfin",
+    "owner": "andreadegiovine",
+    "category": "General"
+  }
+]
