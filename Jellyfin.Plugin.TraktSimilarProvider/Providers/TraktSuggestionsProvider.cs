@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -85,23 +86,23 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
 
         _logger.LogInformation(Plugin.LogPrefix + "Suggestions requested for {Count} source items (limit {Limit})", sourceItems.Count, limit);
 
-        var result = new Dictionary<Guid, IReadOnlyList<BaseItem>>(sourceItems.Count);
+        var result = new ConcurrentDictionary<Guid, IReadOnlyList<BaseItem>>();
 
-        // Suddividiamo gli elementi in blocchi (chunk) di massimo MaxParallelRequests (4).
-        // Questo evita l'uso di SemaphoreSlim (IDisposable) e previene nativamente l'errore CA2025,
-        // limitando comunque il numero di richieste concorrenti a Trakt.
-        foreach (var batch in sourceItems.Chunk(MaxParallelRequests))
-        {
-            var tasks = batch.Select(source => GetSuggestionsForSourceAsync(source, query, limit, cancellationToken));
-            var batchResults = await Task.WhenAll(tasks).ConfigureAwait(false);
-
-            for (var i = 0; i < batch.Length; i++)
+        // Parallel.ForEachAsync gestisce la concorrenza in modo pulito senza passare oggetti IDisposable ai task
+        await Parallel.ForEachAsync(
+            sourceItems,
+            new ParallelOptions
             {
-                result[batch[i].Id] = batchResults[i];
-            }
-        }
+                MaxDegreeOfParallelism = MaxParallelRequests,
+                CancellationToken = cancellationToken
+            },
+            async (source, ct) =>
+            {
+                var suggestions = await GetSuggestionsForSourceAsync(source, query, limit, ct).ConfigureAwait(false);
+                result[source.Id] = suggestions;
+            }).ConfigureAwait(false);
 
-        return result;
+        return new Dictionary<Guid, IReadOnlyList<BaseItem>>(result);
     }
 
     private async Task<IReadOnlyList<BaseItem>> GetSuggestionsForSourceAsync(
