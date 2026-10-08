@@ -134,7 +134,7 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
         {
             CacheResult(MoviesCacheKey, resolved);
         }
-        
+
         return resolved;
     }
 
@@ -155,7 +155,7 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
         {
             CacheResult(ShowsCacheKey, resolved);
         }
-        
+
         return resolved;
     }
 
