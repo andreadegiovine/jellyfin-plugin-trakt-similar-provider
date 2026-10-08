@@ -6,12 +6,14 @@ using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.TraktSimilarProvider.Dto;
 using Jellyfin.Plugin.TraktSimilarProvider.Services;
+using MediaBrowser.Controller.Dto;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.Querying;
 using Microsoft.Extensions.Logging;
 using BaseItem = MediaBrowser.Controller.Entities.BaseItem;
 
@@ -54,6 +56,7 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
 
     private readonly ITraktDiscoveryClient _discoveryClient;
     private readonly ILocalTitleResolver _titleResolver;
+    private readonly ILibraryManager _libraryManager;
     private readonly ILogger<TraktSuggestionsProvider> _logger;
 
     /// <summary>
@@ -61,14 +64,17 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
     /// </summary>
     /// <param name="discoveryClient">Instance of the <see cref="ITraktDiscoveryClient"/> interface.</param>
     /// <param name="titleResolver">Instance of the <see cref="ILocalTitleResolver"/> interface.</param>
+    /// <param name="libraryManager">Instance of the <see cref="ILibraryManager"/> interface.</param>
     /// <param name="logger">Instance of the <see cref="ILogger{TraktSuggestionsProvider}"/> interface.</param>
     public TraktSuggestionsProvider(
         ITraktDiscoveryClient discoveryClient,
         ILocalTitleResolver titleResolver,
+        ILibraryManager libraryManager,
         ILogger<TraktSuggestionsProvider> logger)
     {
         _discoveryClient = discoveryClient;
         _titleResolver = titleResolver;
+        _libraryManager = libraryManager;
         _logger = logger;
     }
 
@@ -88,8 +94,10 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
 
         _logger.LogInformation(Plugin.LogPrefix + "Suggestions requested for {Count} source items (limit {Limit})", sourceItems.Count, limit);
 
+        var imdbIds = GetImdbIds(sourceItems);
+
         var tasks = sourceItems
-            .Select(source => GetSuggestionsForSourceAsync(source, query, limit, cancellationToken))
+            .Select(source => GetSuggestionsForSourceAsync(source, imdbIds.GetValueOrDefault(source.Id), query, limit, cancellationToken))
             .ToList();
         var lists = await Task.WhenAll(tasks).ConfigureAwait(false);
 
@@ -102,16 +110,79 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
         return result;
     }
 
+    /// <summary>
+    /// Gets the IMDb id of every source item that has one. Jellyfin only loads the provider ids of
+    /// an item when the request asks for the <c>ProviderIds</c> field, and the Suggestions request
+    /// made by the web client does not, so the source items usually arrive without any provider id.
+    /// Those items are reloaded here, in a single query, asking for the field explicitly.
+    /// </summary>
+    private Dictionary<Guid, string> GetImdbIds(IReadOnlyList<BaseItem> sourceItems)
+    {
+        var imdbIds = new Dictionary<Guid, string>(sourceItems.Count);
+        var missingIds = new List<Guid>();
+
+        foreach (var source in sourceItems)
+        {
+            if (source.TryGetProviderId(MetadataProvider.Imdb, out var imdbId) && !string.IsNullOrWhiteSpace(imdbId))
+            {
+                imdbIds[source.Id] = imdbId;
+            }
+            else
+            {
+                missingIds.Add(source.Id);
+            }
+        }
+
+        if (missingIds.Count == 0)
+        {
+            return imdbIds;
+        }
+
+        var reloaded = _libraryManager.GetItemList(new InternalItemsQuery
+        {
+            ItemIds = [.. missingIds],
+            Recursive = true,
+            EnableTotalRecordCount = false,
+            DtoOptions = new DtoOptions
+            {
+                Fields = [ItemFields.ProviderIds],
+                EnableImages = false,
+                EnableUserData = false
+            }
+        });
+
+        foreach (var item in reloaded)
+        {
+            if (item.TryGetProviderId(MetadataProvider.Imdb, out var imdbId) && !string.IsNullOrWhiteSpace(imdbId))
+            {
+                imdbIds[item.Id] = imdbId;
+            }
+        }
+
+        _logger.LogDebug(
+            Plugin.LogPrefix + "Reloaded {Requested} source items to read their provider ids, {Found} have an IMDb id",
+            missingIds.Count,
+            missingIds.Count(id => imdbIds.ContainsKey(id)));
+
+        return imdbIds;
+    }
+
     private async Task<IReadOnlyList<BaseItem>> GetSuggestionsForSourceAsync(
         BaseItem source,
+        string? imdbId,
         SimilarItemsQuery query,
         int limit,
         CancellationToken cancellationToken)
     {
-        if (source is not (Movie or Series)
-            || !source.TryGetProviderId(MetadataProvider.Imdb, out var imdbId)
-            || string.IsNullOrWhiteSpace(imdbId))
+        if (source is not (Movie or Series))
         {
+            _logger.LogInformation(Plugin.LogPrefix + "Skipping source item {Name} ({Type}): only movies and shows are supported", source.Name, source.GetType().Name);
+            return Array.Empty<BaseItem>();
+        }
+
+        if (string.IsNullOrWhiteSpace(imdbId))
+        {
+            _logger.LogInformation(Plugin.LogPrefix + "Skipping source item {Name}: it has no IMDb id", source.Name);
             return Array.Empty<BaseItem>();
         }
 
