@@ -9,6 +9,14 @@
     "versions": [
       {
         "changelog": "",
+        "checksum": "802b4f7dff3c66055826d91cc1d72a12",
+        "sourceUrl": "https://github.com/andreadegiovine/jellyfin-plugin-trakt-similar-provider/releases/download/v0.1.0.8/trakt-similar-provider_0.1.0.8.zip",
+        "targetAbi": "12.0.0.0",
+        "timestamp": "2026-10-08T18:43:18Z",
+        "version": "0.1.0.8"
+      },
+      {
+        "changelog": "",
         "checksum": "f311cbbbe2c0d5f54ba586225e4df812",
         "sourceUrl": "https://github.com/andreadegiovine/jellyfin-plugin-trakt-similar-provider/releases/download/v0.1.0.7/trakt-similar-provider_0.1.0.7.zip",
         "targetAbi": "12.0.0.0",
