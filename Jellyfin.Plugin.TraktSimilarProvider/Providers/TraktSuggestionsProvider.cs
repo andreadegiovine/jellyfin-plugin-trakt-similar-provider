@@ -45,9 +45,12 @@ namespace Jellyfin.Plugin.TraktSimilarProvider.Providers;
 public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
 {
     /// <summary>
-    /// Maximum number of concurrent requests to Trakt for a single batch.
+    /// Maximum number of concurrent requests to Trakt. The gate is static (and never disposed)
+    /// so that it is shared by all batches and outlives every task that uses it.
     /// </summary>
     private const int MaxParallelRequests = 4;
+
+    private static readonly SemaphoreSlim RequestGate = new(MaxParallelRequests);
 
     private readonly ITraktDiscoveryClient _discoveryClient;
     private readonly ILocalTitleResolver _titleResolver;
@@ -85,9 +88,8 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
 
         _logger.LogInformation(Plugin.LogPrefix + "Suggestions requested for {Count} source items (limit {Limit})", sourceItems.Count, limit);
 
-        using var gate = new SemaphoreSlim(MaxParallelRequests);
         var tasks = sourceItems
-            .Select(source => GetSuggestionsForSourceAsync(source, query, limit, gate, cancellationToken))
+            .Select(source => GetSuggestionsForSourceAsync(source, query, limit, cancellationToken))
             .ToList();
         var lists = await Task.WhenAll(tasks).ConfigureAwait(false);
 
@@ -104,7 +106,6 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
         BaseItem source,
         SimilarItemsQuery query,
         int limit,
-        SemaphoreSlim gate,
         CancellationToken cancellationToken)
     {
         if (source is not (Movie or Series)
@@ -114,7 +115,7 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
             return Array.Empty<BaseItem>();
         }
 
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await RequestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             var isMovie = source is Movie;
@@ -140,7 +141,7 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
         }
         finally
         {
-            gate.Release();
+            RequestGate.Release();
         }
     }
 }

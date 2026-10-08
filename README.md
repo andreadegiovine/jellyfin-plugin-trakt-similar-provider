@@ -52,7 +52,7 @@ sidebar). The defaults work out of the box.
 | Setting | What it does |
 |---|---|
 | **Cache duration (hours)** | How long Trakt responses are kept in memory. The same cache serves *Similar items* and *Suggestions*, so each title is requested from Trakt at most once per interval. |
-| **Maximum titles per request** | Upper limit of titles handled per request. |
+| **Related titles per request** | How many related titles are requested from Trakt for each movie or show (1-50, default 50). |
 
 ### 2. Enable the provider for "More like this"
 

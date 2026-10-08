@@ -23,8 +23,11 @@
                         <h2>Settings</h2>
 
                         <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="MaxItemsPerRequest">Maximum titles per request</label>
+                            <label class="inputLabel inputLabelUnfocused" for="MaxItemsPerRequest">Related titles per request</label>
                             <input id="MaxItemsPerRequest" name="MaxItemsPerRequest" type="number" is="emby-input" min="1" max="50" />
+                            <div class="fieldDescription">
+                                How many related titles are requested from Trakt for each movie or show (1-50).
+                            </div>
                         </div>
 
                         <div class="inputContainer">

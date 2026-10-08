@@ -13,12 +13,17 @@ public class PluginConfiguration : BasePluginConfiguration
     public const int DefaultCacheHours = 72;
 
     /// <summary>
+    /// Default value of <see cref="MaxItemsPerRequest"/>, which is also the highest value accepted.
+    /// </summary>
+    public const int DefaultMaxItemsPerRequest = 50;
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="PluginConfiguration"/> class.
     /// </summary>
     public PluginConfiguration()
     {
         CacheHours = DefaultCacheHours;
-        MaxItemsPerRequest = 20;
+        MaxItemsPerRequest = DefaultMaxItemsPerRequest;
     }
 
     /// <summary>
@@ -29,7 +34,8 @@ public class PluginConfiguration : BasePluginConfiguration
     public int CacheHours { get; set; }
 
     /// <summary>
-    /// Gets or sets the maximum number of items returned per request.
+    /// Gets or sets how many related titles are requested from Trakt.tv for each movie or show
+    /// (the <c>limit</c> query parameter of <c>/related</c>). Values outside 1-50 are clamped.
     /// </summary>
     public int MaxItemsPerRequest { get; set; }
 }

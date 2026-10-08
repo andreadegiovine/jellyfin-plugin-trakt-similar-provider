@@ -122,14 +122,20 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
     /// </summary>
     private async Task<IReadOnlyList<TraktTitleDto>> GetRelatedAsync(string kind, string imdbId, CancellationToken cancellationToken)
     {
-        var cacheKey = $"trakt-related:{kind}:{imdbId}";
+        var limit = Math.Clamp(
+            Plugin.Instance?.Configuration.MaxItemsPerRequest ?? PluginConfiguration.DefaultMaxItemsPerRequest,
+            1,
+            PluginConfiguration.DefaultMaxItemsPerRequest);
+
+        // The limit is part of the key so that changing the setting is not served stale, shorter lists.
+        var cacheKey = $"trakt-related:{kind}:{imdbId}:{limit}";
         if (_memoryCache.TryGetValue(cacheKey, out IReadOnlyList<TraktTitleDto>? cached) && cached is not null)
         {
             _logger.LogDebug(Plugin.LogPrefix + "Cache hit for related {Kind} of {ImdbId}", kind, imdbId);
             return cached;
         }
 
-        var titles = await SendAsync($"{kind}/{Uri.EscapeDataString(imdbId)}/related", cancellationToken).ConfigureAwait(false);
+        var titles = await SendAsync($"{kind}/{Uri.EscapeDataString(imdbId)}/related?limit={limit}", cancellationToken).ConfigureAwait(false);
         if (titles is null)
         {
             return Array.Empty<TraktTitleDto>();
