@@ -89,6 +89,8 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
 
         var limit = query.Limit ?? 10;
 
+        _logger.LogInformation(Plugin.LogPrefix + "Suggestions requested for {Count} source items (limit {Limit})", sourceItems.Count, limit);
+
         if (movieIds.Count > 0)
         {
             var movies = await GetSuggestedMoviesAsync(limit, cancellationToken).ConfigureAwait(false);
@@ -128,7 +130,11 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
             (token, ct) => _discoveryClient.GetRecommendedMoviesAsync(token, ct),
             cancellationToken).ConfigureAwait(false);
 
-        CacheResult(MoviesCacheKey, resolved);
+        if (resolved.Count > 0)
+        {
+            CacheResult(MoviesCacheKey, resolved);
+        }
+        
         return resolved;
     }
 
@@ -145,7 +151,11 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
             (token, ct) => _discoveryClient.GetRecommendedShowsAsync(token, ct),
             cancellationToken).ConfigureAwait(false);
 
-        CacheResult(ShowsCacheKey, resolved);
+        if (resolved.Count > 0)
+        {
+            CacheResult(ShowsCacheKey, resolved);
+        }
+        
         return resolved;
     }
 
@@ -158,13 +168,14 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
         var userId = Plugin.Instance?.Configuration.SelectedJellyfinUserId ?? Guid.Empty;
         if (userId == Guid.Empty)
         {
+            _logger.LogWarning(Plugin.LogPrefix + "No Jellyfin user selected in the plugin configuration: Trakt suggestions are disabled");
             return Array.Empty<BaseItem>();
         }
 
         var accessToken = _traktPluginBridge.GetAccessToken(userId);
         if (string.IsNullOrWhiteSpace(accessToken))
         {
-            _logger.LogDebug(Plugin.LogPrefix + "No valid Trakt token for the configured Jellyfin user {UserId}", userId);
+            _logger.LogWarning(Plugin.LogPrefix + "No valid Trakt token for the configured Jellyfin user {UserId}", userId);
             return Array.Empty<BaseItem>();
         }
 
@@ -179,7 +190,13 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
             return Array.Empty<BaseItem>();
         }
 
-        return _titleResolver.Resolve(titles, kind, limit);
+        var resolved = _titleResolver.Resolve(titles, kind, limit);
+        _logger.LogInformation(
+            Plugin.LogPrefix + "Trakt returned {TraktCount} {Kind} recommendations, {LocalCount} found in the local library",
+            titles.Count,
+            kind,
+            resolved.Count);
+        return resolved;
     }
 
     private void CacheResult(string key, IReadOnlyList<BaseItem> value)
