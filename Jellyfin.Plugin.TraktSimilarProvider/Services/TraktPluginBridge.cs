@@ -95,7 +95,7 @@ public sealed class TraktPluginBridge : ITraktPluginBridge
         }
         catch (Exception ex) when (ex is MemberAccessException or TargetException or AmbiguousMatchException)
         {
-            _logger.LogWarning(ex, "Lettura riflessa della configurazione del plugin Trakt ufficiale fallita (forma inattesa, probabile aggiornamento incompatibile)");
+            _logger.LogWarning(ex, Plugin.LogPrefix + "Could not read the official Trakt plugin configuration (unexpected shape, probably an incompatible update of that plugin)");
             return null;
         }
     }

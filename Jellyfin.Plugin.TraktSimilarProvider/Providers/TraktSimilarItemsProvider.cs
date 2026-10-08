@@ -70,7 +70,7 @@ public sealed class TraktSimilarItemsProvider : IRemoteSimilarItemsProvider<Movi
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Recupero titoli correlati Trakt fallito per il film {ImdbId}", imdbId);
+            _logger.LogWarning(ex, Plugin.LogPrefix + "Failed to fetch related titles from Trakt for movie {ImdbId}", imdbId);
             yield break;
         }
 
@@ -98,7 +98,7 @@ public sealed class TraktSimilarItemsProvider : IRemoteSimilarItemsProvider<Movi
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Recupero titoli correlati Trakt fallito per la serie {ImdbId}", imdbId);
+            _logger.LogWarning(ex, Plugin.LogPrefix + "Failed to fetch related titles from Trakt for show {ImdbId}", imdbId);
             yield break;
         }
 

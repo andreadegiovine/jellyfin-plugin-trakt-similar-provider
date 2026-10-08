@@ -164,7 +164,7 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
         var accessToken = _traktPluginBridge.GetAccessToken(userId);
         if (string.IsNullOrWhiteSpace(accessToken))
         {
-            _logger.LogDebug("Nessun token Trakt valido per l'utente Jellyfin configurato {UserId}", userId);
+            _logger.LogDebug(Plugin.LogPrefix + "No valid Trakt token for the configured Jellyfin user {UserId}", userId);
             return Array.Empty<BaseItem>();
         }
 
@@ -175,7 +175,7 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Recupero raccomandazioni Trakt fallito");
+            _logger.LogWarning(ex, Plugin.LogPrefix + "Failed to fetch Trakt recommendations");
             return Array.Empty<BaseItem>();
         }
 

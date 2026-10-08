@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -28,6 +29,13 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
     /// come concordato con l'utente: vedi la cronologia di sviluppo per il contesto).
     /// </summary>
     private const string TraktClientId = "bfdd2e032c30c35b368f97ef4ec81587b899bcb028b91a1d4ba5589a4b6a7267";
+
+    /// <summary>
+    /// Lunghezza massima del body (richiesta o risposta) riportata nei log di errore.
+    /// </summary>
+    private const int MaxLoggedBodyLength = 2000;
+
+    private static readonly string UserAgent = BuildUserAgent();
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<TraktDiscoveryClient> _logger;
@@ -82,6 +90,101 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
         return string.Join('&', parameters);
     }
 
+    private static string BuildUserAgent()
+    {
+        var version = typeof(TraktDiscoveryClient).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        return $"Jellyfin-Trakt-Similar-Provider/{version}";
+    }
+
+    private static string FormatHeaders(params HttpHeaders?[] headerSets)
+    {
+        var parts = new List<string>();
+        foreach (var headers in headerSets)
+        {
+            if (headers is null)
+            {
+                continue;
+            }
+
+            foreach (var header in headers)
+            {
+                // Il token di accesso dell'utente non deve mai finire nei log.
+                var value = header.Key.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
+                    ? "<redacted>"
+                    : string.Join(',', header.Value);
+                parts.Add($"{header.Key}: {value}");
+            }
+        }
+
+        return parts.Count == 0 ? "<none>" : string.Join("; ", parts);
+    }
+
+    private static async Task<string> FormatBodyAsync(HttpContent? content)
+    {
+        if (content is null)
+        {
+            return "<none>";
+        }
+
+        string body;
+        try
+        {
+            body = await content.ReadAsStringAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or ObjectDisposedException)
+        {
+            return $"<unreadable: {ex.Message}>";
+        }
+
+        if (body.Length == 0)
+        {
+            return "<empty>";
+        }
+
+        return body.Length > MaxLoggedBodyLength
+            ? string.Concat(body.AsSpan(0, MaxLoggedBodyLength), "... (truncated)")
+            : body;
+    }
+
+    /// <summary>
+    /// Registra nei log tutti i dettagli utili a diagnosticare una richiesta HTTP fallita:
+    /// metodo, URL, header e body della richiesta e, se disponibile, stato, header e body della risposta.
+    /// </summary>
+    private async Task LogRequestFailureAsync(HttpRequestMessage request, HttpResponseMessage? response, Exception? exception)
+    {
+        var method = request.Method.Method;
+        var url = request.RequestUri?.ToString() ?? "<unknown>";
+        var requestHeaders = FormatHeaders(request.Headers, request.Content?.Headers);
+        var requestBody = await FormatBodyAsync(request.Content).ConfigureAwait(false);
+
+        if (response is null)
+        {
+            _logger.LogWarning(
+                exception,
+                Plugin.LogPrefix + "HTTP request failed. Method: {Method}; URL: {Url}; Request headers: {RequestHeaders}; Request body: {RequestBody}",
+                method,
+                url,
+                requestHeaders,
+                requestBody);
+            return;
+        }
+
+        var responseHeaders = FormatHeaders(response.Headers, response.Content.Headers);
+        var responseBody = await FormatBodyAsync(response.Content).ConfigureAwait(false);
+
+        _logger.LogWarning(
+            exception,
+            Plugin.LogPrefix + "HTTP request failed with status {StatusCode} {ReasonPhrase}. Method: {Method}; URL: {Url}; Request headers: {RequestHeaders}; Request body: {RequestBody}; Response headers: {ResponseHeaders}; Response body: {ResponseBody}",
+            (int)response.StatusCode,
+            response.ReasonPhrase,
+            method,
+            url,
+            requestHeaders,
+            requestBody,
+            responseHeaders,
+            responseBody);
+    }
+
     private async Task<IReadOnlyList<TraktTitleDto>> SendAsync(string relativeUrl, string? accessToken, CancellationToken cancellationToken)
     {
         var client = _httpClientFactory.CreateClient(HttpClientName);
@@ -91,14 +194,19 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
             using var request = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/{relativeUrl}");
             request.Headers.Add("trakt-api-version", "2");
             request.Headers.Add("trakt-api-key", TraktClientId);
+
+            // Trakt sta dietro Cloudflare, che puo' rifiutare con 403 le richieste senza User-Agent.
+            request.Headers.UserAgent.ParseAdd(UserAgent);
+
             if (!string.IsNullOrEmpty(accessToken))
             {
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
             }
 
+            HttpResponseMessage? response = null;
             try
             {
-                using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
 
                 if (response.StatusCode == HttpStatusCode.TooManyRequests && attempt == 0)
                 {
@@ -109,7 +217,7 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("Trakt ha risposto {StatusCode} per {Url}", (int)response.StatusCode, relativeUrl);
+                    await LogRequestFailureAsync(request, response, exception: null).ConfigureAwait(false);
                     return Array.Empty<TraktTitleDto>();
                 }
 
@@ -117,10 +225,20 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
                 var result = await JsonSerializer.DeserializeAsync<List<TraktTitleDto>>(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
                 return result ?? [];
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Annullata dal chiamante (es. l'utente ha lasciato la pagina): non e' un errore.
+                _logger.LogDebug(Plugin.LogPrefix + "Request cancelled by the caller: {Url}", request.RequestUri);
+                return Array.Empty<TraktTitleDto>();
+            }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
             {
-                _logger.LogWarning(ex, "Chiamata a Trakt fallita per {Url}", relativeUrl);
+                await LogRequestFailureAsync(request, response, ex).ConfigureAwait(false);
                 return Array.Empty<TraktTitleDto>();
+            }
+            finally
+            {
+                response?.Dispose();
             }
         }
 
