@@ -1,22 +1,26 @@
 ---
 name: "Trakt Similar Provider"
 guid: "a3f1c9d4-7e2b-4a6f-9c1d-5b8e2f0a6c3d"
-version: "0.1.0.0"
+version: "0.2.0.0"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
-overview: "Aggiunge 'Trakt' come fornitore nativo di elementi simili e suggerimenti, basato sul plugin Trakt ufficiale"
+overview: "Adds Trakt as a native provider of similar items and suggestions"
 description: >
-  Registra un fornitore "Trakt" selezionabile nelle impostazioni di libreria di Jellyfin 12
-  (Fornitori di elementi simili), accanto a TheMovieDb e Local Genre/Tag, usando gli endpoint
-  pubblici /movies|shows/{id}/related di Trakt.tv per film e serie. Aggiunge inoltre un
-  fornitore di suggerimenti basato su /recommendations/movies e /recommendations/shows,
-  personalizzati in base all'account Trakt collegato tramite il plugin ufficiale "Trakt"
-  (da cui dipende). Nessuna libreria virtuale: ogni risultato viene verificato contro la
-  libreria locale prima di essere mostrato.
+  Registers a "Trakt" provider that can be selected in the library settings of Jellyfin 12
+  (Similar item providers), next to TheMovieDb and Local Genre/Tag, using the public
+  /movies|shows/{id}/related endpoints of Trakt.tv for movies and shows. The same data also
+  feeds the Suggestions tab ("Because you watched..." and "Because you liked..."). No Trakt
+  account is required. No virtual library is created: every result is checked against the
+  local library before being shown.
 category: "General"
-owner: "self-hosted"
+owner: "andreadegiovine"
 artifacts:
 - "Jellyfin.Plugin.TraktSimilarProvider.dll"
 changelog: >
-  0.1.0.0 - Prima versione: provider "Trakt" per Simili (film/serie) via /related,
-  provider di Suggerimenti via /recommendations con filtro watchnow=favorites.
+  0.2.0.0 - Suggestions now use /movies|shows/{id}/related for each watched or liked item
+  instead of /recommendations, with one cache shared with Similar items. Removed the Trakt
+  user selection and the dependency on the official Trakt plugin. Added a link to the
+  configuration page in the dashboard sidebar. All labels and comments are now in English.
+
+  0.1.0.0 - First version: "Trakt" provider for Similar items (movies/shows) via /related,
+  Suggestions provider via /recommendations with the watchnow=favorites filter.

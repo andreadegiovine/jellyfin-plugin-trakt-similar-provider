@@ -5,20 +5,19 @@ A Jellyfin **12** plugin that adds **Trakt** as a native provider for:
 - **Similar items** – the "More like this" row on movie and show pages. "Trakt" shows up in
   *Dashboard → Libraries → (your library) → Similar item providers*, next to *TheMovieDb* and
   *Local Genre/Tag*.
-- **Suggestions** – the *Suggestions* tab of your library, filled with Trakt's personalised
-  recommendations for the Trakt account you pick.
+- **Suggestions** – the *Suggestions* tab of your library: the "Because you watched X" and
+  "Because you liked X" rows, filled with the titles Trakt relates to each of those items.
 
-Nothing is ever added to your library: every title suggested by Trakt is matched against what
-you actually own, and titles you don't have are simply dropped.
+Both features use the same public Trakt data (`/movies/{id}/related` and `/shows/{id}/related`),
+need no Trakt account, and share a single cache. Nothing is ever added to your library: every
+title suggested by Trakt is matched against what you actually own, and titles you don't have
+are simply dropped.
 
 ## Requirements
 
 - Jellyfin **12.0 or newer** (built against 12.1).
-- For **Similar items**: nothing else. It uses public Trakt data and does not need a Trakt account.
-- For **Suggestions**: the official
-  [Trakt plugin](https://github.com/jellyfin/jellyfin-plugin-trakt) installed, with at least one
-  Jellyfin user linked to a Trakt account. This plugin reuses the link and the access token stored by
-  that plugin; it never asks you for Trakt credentials.
+- Nothing else: the plugin uses public Trakt data, so no Trakt account and no other plugin
+  (including the official Trakt plugin) is needed.
 
 ## Installation
 
@@ -45,24 +44,17 @@ you actually own, and titles you don't have are simply dropped.
 
 ## Setup
 
-### 1. Link your Trakt account (needed for Suggestions only)
+### 1. Configure this plugin (optional)
 
-Install the official Trakt plugin, open its settings and link the Jellyfin user to a Trakt account.
-
-### 2. Configure this plugin
-
-Open **Dashboard → Plugins → Trakt Similar Provider**.
+Open **Dashboard → Plugins → Trakt Similar Provider** (there is also a shortcut in the dashboard
+sidebar). The defaults work out of the box.
 
 | Setting | What it does |
 |---|---|
-| **Trakt user for personalised Suggestions** | The Jellyfin user whose linked Trakt account is used for the *Suggestions* tab. The list only contains users linked in the official Trakt plugin. Leave it on *None* to turn Suggestions off. |
-| **Streaming availability filter (watchnow)** | Asks Trakt to return only titles available on streaming services: your favourite services, any service in your country, any service in any country, or free ones. *None* disables the filter. |
-| **"Similar" cache (days)** | How long Jellyfin keeps the "More like this" results for each item. `0` disables caching. |
-| **Suggestions cache (hours)** | How long this plugin keeps Trakt recommendations in memory before asking Trakt again. |
+| **Cache duration (hours)** | How long Trakt responses are kept in memory. The same cache serves *Similar items* and *Suggestions*, so each title is requested from Trakt at most once per interval. |
+| **Maximum titles per request** | Upper limit of titles handled per request. |
 
-The page also shows whether the official Trakt plugin was detected.
-
-### 3. Enable the provider for "More like this"
+### 2. Enable the provider for "More like this"
 
 1. Go to **Dashboard → Libraries** and edit a movie or show library.
 2. In **Similar item providers**, tick **Trakt**. Drag it up or down to set its priority compared
@@ -78,22 +70,21 @@ serves that tab automatically (see the notes below).
   or an IMDb id, but not a TMDb id. A movie or show without an IMDb id in its metadata gets no
   "More like this" results from Trakt. Refreshing metadata from a provider that fills in IMDb ids
   usually fixes it.
-- **Suggestions repeat the same list.** Trakt has no "similar to this title" recommendation, only
-  one personalised list per user. Every row of the *Suggestions* tab therefore shows the same titles.
+- **Suggestions are built per source item.** Jellyfin passes the recently watched and the liked
+  items to the plugin; for each one the plugin asks Trakt for its related titles, so every
+  "Because you watched X" / "Because you liked X" row is specific to X. Titles you have already
+  watched are left out.
+- **Suggestions are movies only, for now.** Jellyfin currently builds the *Suggestions* tab for
+  movies only. Shows are supported by the plugin (Similar items work for them today, and show
+  suggestions will work as soon as Jellyfin asks for them).
 - **The Suggestions tab is replaced, not extended.** Jellyfin uses a single provider for that tab,
-  and this plugin takes precedence over the built-in *Local Genre/Tag* one. If no Trakt user is
-  selected, the official Trakt plugin is missing, or the token is not valid, the tab will be empty
-  until you fix it. To get the built-in suggestions back, uninstall this plugin.
-- **Only titles in your library are shown.** For Suggestions the plugin also asks Trakt to leave
-  out titles you have already watched.
+  and this plugin takes precedence over the built-in *Local Genre/Tag* one. To get the built-in
+  suggestions back, uninstall this plugin.
+- **Only titles in your library are shown.**
 - **Shared Trakt application.** Trakt requires an application key on every request, even for
   public data, and new Trakt applications now require a VIP subscription. This plugin therefore
   reuses the public key of the official Jellyfin Trakt plugin, so its requests share that
   application's rate limit.
-- **Compatibility with the official Trakt plugin.** The link between Jellyfin users and Trakt
-  accounts is read from the official plugin while Jellyfin is running. If a future update of that
-  plugin changes its internals, Suggestions will stop working until this plugin is updated;
-  "More like this" keeps working. A warning is written to the log.
 
 ## Troubleshooting
 
@@ -102,17 +93,14 @@ Jellyfin log (**Dashboard → Logs**) on that text.
 
 When a request to Trakt fails, the plugin logs a warning with everything needed to understand
 it: the HTTP method, URL, request headers, request body, and the response status, headers and
-body. Your Trakt access token is never written to the log (the `Authorization` header is shown
-as `<redacted>`).
+body.
 
 | Symptom | Likely cause |
 |---|---|
 | `HTTP request failed with status 403` | Trakt (or Cloudflare in front of it) refused the request. Check the response body and headers in the log line. |
-| `HTTP request failed with status 401` | The Trakt token of the selected user is expired or revoked. Open the official Trakt plugin and re-link the account. |
 | `HTTP request failed with status 429` | Too many requests. The plugin retries once and then gives up for that request. |
 | No "More like this" results from Trakt | The item has no IMDb id, or none of the titles Trakt suggests are in your library. |
-| Empty *Suggestions* tab | No Trakt user selected, official Trakt plugin missing or not linked, or an expired token. |
-| `Could not read the official Trakt plugin configuration` | The official Trakt plugin changed in a way this plugin does not understand yet. |
+| Empty *Suggestions* tab | You have not watched or liked any movie yet, the source movies have no IMDb id, or none of the related titles are in your library (or you have already watched them all). |
 
 If you open an issue, please include the log lines starting with `Trakt Similar Provider:`.
 

@@ -19,7 +19,7 @@ jobs:
           VERSION="${{ github.event.release.tag_name }}"
           VERSION="${VERSION#v}"
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Tag '${{ github.event.release.tag_name }}' non valido: usa il formato vX.Y.Z.W (es. v0.1.0.1)"
+            echo "Invalid tag '${{ github.event.release.tag_name }}': use the format vX.Y.Z.W (e.g. v0.1.0.1)"
             exit 1
           fi
           sed -i "s/^version: .*/version: \"$VERSION\"/" build.yaml
@@ -84,8 +84,8 @@ jobs:
           name: build-yaml
           path: ${{ runner.temp }}/build-yaml
 
-      # Il generatore del manifest (jellyfin-plugin-repo-action) preferisce un asset
-      # chiamato build.yaml rispetto a quello committato nel tag: da qui prende "version".
+      # The manifest generator (jellyfin-plugin-repo-action) prefers an asset named
+      # build.yaml over the one committed in the tag: it takes "version" from there.
       - name: Upload build.yaml as release asset
         uses: shogo82148/actions-upload-release-asset@v1.9.2
         with:

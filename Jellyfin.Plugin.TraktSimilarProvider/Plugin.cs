@@ -10,21 +10,15 @@ using MediaBrowser.Model.Serialization;
 namespace Jellyfin.Plugin.TraktSimilarProvider;
 
 /// <summary>
-/// Plugin principale: registra "Trakt" come fornitore di elementi simili (film e serie) e
-/// di suggerimenti, basandosi sul plugin ufficiale "Trakt" per le credenziali dell'utente.
+/// Main plugin class: registers "Trakt" as a provider of similar items (movies and shows) and of
+/// suggestions, both based on the public Trakt.tv <c>/related</c> endpoints.
 /// </summary>
 public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 {
     /// <summary>
-    /// Prefisso anteposto a ogni messaggio di log di questo plugin, per riconoscerlo nei log del server.
+    /// Prefix prepended to every log message of this plugin, to make it easy to find in the server log.
     /// </summary>
     public const string LogPrefix = "Trakt Similar Provider: ";
-
-    /// <summary>
-    /// GUID del plugin ufficiale "Trakt" (jellyfin/jellyfin-plugin-trakt), da cui dipendiamo
-    /// per le credenziali dell'account collegato. Verificato dal sorgente ufficiale: Trakt/Plugin.cs.
-    /// </summary>
-    public static readonly Guid OfficialTraktPluginId = new("4fe3201e-d6ae-4f2e-8917-e12bda571281");
 
     /// <summary>
     /// Initializes a new instance of the <see cref="Plugin"/> class.
@@ -56,10 +50,14 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
             new PluginPageInfo
             {
                 Name = Name,
+                DisplayName = Name,
                 EmbeddedResourcePath = string.Format(
                     CultureInfo.InvariantCulture,
                     "{0}.Configuration.configPage.html",
-                    GetType().Namespace)
+                    GetType().Namespace),
+                EnableInMainMenu = true,
+                MenuSection = "server",
+                MenuIcon = "recommend"
             }
         ];
     }

@@ -11,62 +11,61 @@ using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Configuration;
-using Microsoft.Extensions.Caching.Memory;
+using MediaBrowser.Model.Entities;
 using Microsoft.Extensions.Logging;
+using BaseItem = MediaBrowser.Controller.Entities.BaseItem;
 
 namespace Jellyfin.Plugin.TraktSimilarProvider.Providers;
 
 /// <summary>
-/// Fornitore nativo "Trakt" per la tab Suggerimenti (film e serie), basato sugli endpoint
-/// personalizzati <c>/recommendations/movies|shows</c> di Trakt.tv.
+/// Native "Trakt" provider for the Suggestions tab, based on the public
+/// <c>/movies|shows/{imdbId}/related</c> endpoints of Trakt.tv.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A differenza del fornitore "Simili" (<see cref="TraktSimilarItemsProvider"/>), Trakt non
-/// offre un concetto di "raccomandazioni simili a QUESTO film visto di recente": la sua API di
-/// raccomandazioni è un'unica lista personalizzata per utente, senza un titolo seme. Questo
-/// fornitore restituisce quindi la stessa lista per ciascun item sorgente del batch: le diverse
-/// categorie della tab Suggerimenti mostreranno gli stessi titoli. È un limite noto e accettato,
-/// non un errore.
+/// Jellyfin builds the "Because you watched X" (<c>SimilarToRecentlyPlayed</c>) and
+/// "Because you liked X" (<c>SimilarToLikedItem</c>) rows by passing the recently played and the
+/// liked items as the <em>source items</em> of a batch request, and by expecting a separate list
+/// of similar items for each of them. This provider therefore asks Trakt for the titles related to
+/// each source item, so every row is specific to its source and no Trakt account is needed.
+/// The responses are cached by <see cref="ITraktDiscoveryClient"/>, the same cache used by
+/// <see cref="TraktSimilarItemsProvider"/>.
 /// </para>
 /// <para>
-/// Se nessun utente Jellyfin è stato selezionato in configurazione, o il suo account Trakt non
-/// risulta collegato/valido, questo fornitore restituisce un risultato vuoto per ogni item
-/// sorgente: non c'è alcun fallback automatico al fornitore nativo "Local Genre/Tag", perché il
-/// core usa un solo fornitore batch alla volta (il primo trovato). In tal caso la tab Suggerimenti
-/// risulterà vuota finché la configurazione non viene completata.
+/// Jellyfin currently builds Suggestions for movies only, so in practice only movie source items
+/// are received; show source items are handled as well in case the server starts sending them.
+/// Titles already watched by the requesting user are skipped, and only titles present in the
+/// local library are returned.
+/// </para>
+/// <para>
+/// Jellyfin uses a single batch provider for the Suggestions tab (the first one found), so when
+/// this plugin is installed it takes the place of the built-in "Local Genre/Tag" one.
 /// </para>
 /// </remarks>
 public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
 {
-    private const string MoviesCacheKey = "trakt-suggestions:movies";
-    private const string ShowsCacheKey = "trakt-suggestions:shows";
+    /// <summary>
+    /// Maximum number of concurrent requests to Trakt for a single batch.
+    /// </summary>
+    private const int MaxParallelRequests = 4;
 
     private readonly ITraktDiscoveryClient _discoveryClient;
-    private readonly ITraktPluginBridge _traktPluginBridge;
     private readonly ILocalTitleResolver _titleResolver;
-    private readonly IMemoryCache _memoryCache;
     private readonly ILogger<TraktSuggestionsProvider> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TraktSuggestionsProvider"/> class.
     /// </summary>
     /// <param name="discoveryClient">Instance of the <see cref="ITraktDiscoveryClient"/> interface.</param>
-    /// <param name="traktPluginBridge">Instance of the <see cref="ITraktPluginBridge"/> interface.</param>
     /// <param name="titleResolver">Instance of the <see cref="ILocalTitleResolver"/> interface.</param>
-    /// <param name="memoryCache">Instance of the <see cref="IMemoryCache"/> interface.</param>
     /// <param name="logger">Instance of the <see cref="ILogger{TraktSuggestionsProvider}"/> interface.</param>
     public TraktSuggestionsProvider(
         ITraktDiscoveryClient discoveryClient,
-        ITraktPluginBridge traktPluginBridge,
         ILocalTitleResolver titleResolver,
-        IMemoryCache memoryCache,
         ILogger<TraktSuggestionsProvider> logger)
     {
         _discoveryClient = discoveryClient;
-        _traktPluginBridge = traktPluginBridge;
         _titleResolver = titleResolver;
-        _memoryCache = memoryCache;
         _logger = logger;
     }
 
@@ -82,126 +81,66 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
         SimilarItemsQuery query,
         CancellationToken cancellationToken)
     {
-        var result = new Dictionary<Guid, IReadOnlyList<BaseItem>>(sourceItems.Count);
-
-        var movieIds = sourceItems.Where(i => i is Movie).Select(i => i.Id).ToList();
-        var seriesIds = sourceItems.Where(i => i is Series).Select(i => i.Id).ToList();
-
         var limit = query.Limit ?? 10;
 
         _logger.LogInformation(Plugin.LogPrefix + "Suggestions requested for {Count} source items (limit {Limit})", sourceItems.Count, limit);
 
-        if (movieIds.Count > 0)
-        {
-            var movies = await GetSuggestedMoviesAsync(limit, cancellationToken).ConfigureAwait(false);
-            foreach (var id in movieIds)
-            {
-                result[id] = movies;
-            }
-        }
+        using var gate = new SemaphoreSlim(MaxParallelRequests);
+        var tasks = sourceItems
+            .Select(source => GetSuggestionsForSourceAsync(source, query, limit, gate, cancellationToken))
+            .ToList();
+        var lists = await Task.WhenAll(tasks).ConfigureAwait(false);
 
-        if (seriesIds.Count > 0)
+        var result = new Dictionary<Guid, IReadOnlyList<BaseItem>>(sourceItems.Count);
+        for (var i = 0; i < sourceItems.Count; i++)
         {
-            var shows = await GetSuggestedShowsAsync(limit, cancellationToken).ConfigureAwait(false);
-            foreach (var id in seriesIds)
-            {
-                result[id] = shows;
-            }
-        }
-
-        foreach (var item in sourceItems)
-        {
-            result.TryAdd(item.Id, Array.Empty<BaseItem>());
+            result[sourceItems[i].Id] = lists[i];
         }
 
         return result;
     }
 
-    private async Task<IReadOnlyList<BaseItem>> GetSuggestedMoviesAsync(int limit, CancellationToken cancellationToken)
-    {
-        if (_memoryCache.TryGetValue(MoviesCacheKey, out IReadOnlyList<BaseItem>? cached) && cached is not null)
-        {
-            return cached;
-        }
-
-        var resolved = await FetchAndResolveAsync(
-            BaseItemKind.Movie,
-            limit,
-            (token, ct) => _discoveryClient.GetRecommendedMoviesAsync(token, ct),
-            cancellationToken).ConfigureAwait(false);
-
-        if (resolved.Count > 0)
-        {
-            CacheResult(MoviesCacheKey, resolved);
-        }
-
-        return resolved;
-    }
-
-    private async Task<IReadOnlyList<BaseItem>> GetSuggestedShowsAsync(int limit, CancellationToken cancellationToken)
-    {
-        if (_memoryCache.TryGetValue(ShowsCacheKey, out IReadOnlyList<BaseItem>? cached) && cached is not null)
-        {
-            return cached;
-        }
-
-        var resolved = await FetchAndResolveAsync(
-            BaseItemKind.Series,
-            limit,
-            (token, ct) => _discoveryClient.GetRecommendedShowsAsync(token, ct),
-            cancellationToken).ConfigureAwait(false);
-
-        if (resolved.Count > 0)
-        {
-            CacheResult(ShowsCacheKey, resolved);
-        }
-
-        return resolved;
-    }
-
-    private async Task<IReadOnlyList<BaseItem>> FetchAndResolveAsync(
-        BaseItemKind kind,
+    private async Task<IReadOnlyList<BaseItem>> GetSuggestionsForSourceAsync(
+        BaseItem source,
+        SimilarItemsQuery query,
         int limit,
-        Func<string, CancellationToken, Task<IReadOnlyList<TraktTitleDto>>> fetch,
+        SemaphoreSlim gate,
         CancellationToken cancellationToken)
     {
-        var userId = Plugin.Instance?.Configuration.SelectedJellyfinUserId ?? Guid.Empty;
-        if (userId == Guid.Empty)
+        if (source is not (Movie or Series)
+            || !source.TryGetProviderId(MetadataProvider.Imdb, out var imdbId)
+            || string.IsNullOrWhiteSpace(imdbId))
         {
-            _logger.LogWarning(Plugin.LogPrefix + "No Jellyfin user selected in the plugin configuration: Trakt suggestions are disabled");
             return Array.Empty<BaseItem>();
         }
 
-        var accessToken = _traktPluginBridge.GetAccessToken(userId);
-        if (string.IsNullOrWhiteSpace(accessToken))
-        {
-            _logger.LogWarning(Plugin.LogPrefix + "No valid Trakt token for the configured Jellyfin user {UserId}", userId);
-            return Array.Empty<BaseItem>();
-        }
-
-        IReadOnlyList<TraktTitleDto> titles;
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            titles = await fetch(accessToken, cancellationToken).ConfigureAwait(false);
+            var isMovie = source is Movie;
+            IReadOnlyList<TraktTitleDto> titles = isMovie
+                ? await _discoveryClient.GetRelatedMoviesAsync(imdbId, cancellationToken).ConfigureAwait(false)
+                : await _discoveryClient.GetRelatedShowsAsync(imdbId, cancellationToken).ConfigureAwait(false);
+
+            var kind = isMovie ? BaseItemKind.Movie : BaseItemKind.Series;
+            var resolved = _titleResolver.Resolve(titles, kind, limit, query.User, [.. query.ExcludeItemIds, source.Id]);
+
+            _logger.LogInformation(
+                Plugin.LogPrefix + "Trakt returned {TraktCount} related {Kind} titles for {ImdbId}, {LocalCount} found in the local library",
+                titles.Count,
+                kind,
+                imdbId,
+                resolved.Count);
+            return resolved;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, Plugin.LogPrefix + "Failed to fetch Trakt recommendations");
+            _logger.LogWarning(ex, Plugin.LogPrefix + "Failed to build Trakt suggestions for {ImdbId}", imdbId);
             return Array.Empty<BaseItem>();
         }
-
-        var resolved = _titleResolver.Resolve(titles, kind, limit);
-        _logger.LogInformation(
-            Plugin.LogPrefix + "Trakt returned {TraktCount} {Kind} recommendations, {LocalCount} found in the local library",
-            titles.Count,
-            kind,
-            resolved.Count);
-        return resolved;
-    }
-
-    private void CacheResult(string key, IReadOnlyList<BaseItem> value)
-    {
-        var hours = Math.Max(1, Plugin.Instance?.Configuration.RecommendationsCacheHours ?? 6);
-        _memoryCache.Set(key, value, TimeSpan.FromHours(hours));
+        finally
+        {
+            gate.Release();
+        }
     }
 }

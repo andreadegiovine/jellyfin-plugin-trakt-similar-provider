@@ -8,12 +8,15 @@
     <Nullable>enable</Nullable>
     <AnalysisMode>AllEnabledByDefault</AnalysisMode>
     <LangVersion>latest</LangVersion>
+    <Authors>andreadegiovine</Authors>
+    <Company>andreadegiovine</Company>
+    <Copyright>Copyright (c) andreadegiovine</Copyright>
   </PropertyGroup>
 
   <ItemGroup>
     <!--
-      Versioni allineate alla versione del server Jellyfin target (12.1.0), verificate su
-      nuget.org prima dell'uso.
+      Versions aligned with the target Jellyfin server version (12.1.0), verified on
+      nuget.org before use.
     -->
     <PackageReference Include="Jellyfin.Controller" Version="12.1.0">
       <ExcludeAssets>runtime</ExcludeAssets>

@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.TraktSimilarProvider.Configuration;
 using Jellyfin.Plugin.TraktSimilarProvider.Dto;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.TraktSimilarProvider.Services;
@@ -17,78 +18,50 @@ namespace Jellyfin.Plugin.TraktSimilarProvider.Services;
 public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
 {
     /// <summary>
-    /// Nome del client HTTP nominato registrato in <c>PluginServiceRegistrator</c>.
+    /// Name of the named HTTP client registered in <c>PluginServiceRegistrator</c>.
     /// </summary>
     public const string HttpClientName = "TraktSimilarProviderClient";
 
     private const string BaseUrl = "https://api.trakt.tv";
 
     /// <summary>
-    /// Client id dell'applicazione Trakt del plugin ufficiale jellyfin-plugin-trakt
-    /// (valore pubblico, copiato da Trakt/Api/TraktURIs.cs nel loro repository open source,
-    /// come concordato con l'utente: vedi la cronologia di sviluppo per il contesto).
+    /// Client id of the Trakt application used by the official jellyfin-plugin-trakt (public
+    /// value, copied from Trakt/Api/TraktURIs.cs in their open source repository). Trakt requires
+    /// an application key on every request, even for public data.
     /// </summary>
     private const string TraktClientId = "bfdd2e032c30c35b368f97ef4ec81587b899bcb028b91a1d4ba5589a4b6a7267";
 
     /// <summary>
-    /// Lunghezza massima del body (richiesta o risposta) riportata nei log di errore.
+    /// Maximum length of a body (request or response) reported in the error logs.
     /// </summary>
     private const int MaxLoggedBodyLength = 2000;
 
     private static readonly string UserAgent = BuildUserAgent();
 
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IMemoryCache _memoryCache;
     private readonly ILogger<TraktDiscoveryClient> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TraktDiscoveryClient"/> class.
     /// </summary>
     /// <param name="httpClientFactory">Instance of the <see cref="IHttpClientFactory"/> interface.</param>
+    /// <param name="memoryCache">Instance of the <see cref="IMemoryCache"/> interface.</param>
     /// <param name="logger">Instance of the <see cref="ILogger{TraktDiscoveryClient}"/> interface.</param>
-    public TraktDiscoveryClient(IHttpClientFactory httpClientFactory, ILogger<TraktDiscoveryClient> logger)
+    public TraktDiscoveryClient(IHttpClientFactory httpClientFactory, IMemoryCache memoryCache, ILogger<TraktDiscoveryClient> logger)
     {
         _httpClientFactory = httpClientFactory;
+        _memoryCache = memoryCache;
         _logger = logger;
     }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<TraktTitleDto>> GetRelatedMoviesAsync(string imdbId, CancellationToken cancellationToken)
-        => SendAsync($"movies/{Uri.EscapeDataString(imdbId)}/related", accessToken: null, cancellationToken);
+        => GetRelatedAsync("movies", imdbId, cancellationToken);
 
     /// <inheritdoc />
     public Task<IReadOnlyList<TraktTitleDto>> GetRelatedShowsAsync(string imdbId, CancellationToken cancellationToken)
-        => SendAsync($"shows/{Uri.EscapeDataString(imdbId)}/related", accessToken: null, cancellationToken);
-
-    /// <inheritdoc />
-    public Task<IReadOnlyList<TraktTitleDto>> GetRecommendedMoviesAsync(string accessToken, CancellationToken cancellationToken)
-        => SendAsync($"recommendations/movies?{BuildRecommendationsQuery()}", accessToken, cancellationToken);
-
-    /// <inheritdoc />
-    public Task<IReadOnlyList<TraktTitleDto>> GetRecommendedShowsAsync(string accessToken, CancellationToken cancellationToken)
-        => SendAsync($"recommendations/shows?{BuildRecommendationsQuery()}", accessToken, cancellationToken);
-
-    private static string BuildRecommendationsQuery()
-    {
-        // Parametri fissi/noti, nessun input esterno da incapsulare: concatenazione diretta sicura.
-        var parameters = new List<string> { "ignore_watched=true" };
-
-        var watchNow = Plugin.Instance?.Configuration.WatchNowFilter ?? WatchNowFilter.None;
-        var watchNowValue = watchNow switch
-        {
-            WatchNowFilter.Favorites => "favorites",
-            WatchNowFilter.Any => "any",
-            WatchNowFilter.AnyAll => "any_all",
-            WatchNowFilter.Free => "free",
-            _ => null
-        };
-
-        if (watchNowValue is not null)
-        {
-            parameters.Add($"watchnow={watchNowValue}");
-        }
-
-        return string.Join('&', parameters);
-    }
+        => GetRelatedAsync("shows", imdbId, cancellationToken);
 
     private static string BuildUserAgent()
     {
@@ -108,11 +81,7 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
 
             foreach (var header in headers)
             {
-                // Il token di accesso dell'utente non deve mai finire nei log.
-                var value = header.Key.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
-                    ? "<redacted>"
-                    : string.Join(',', header.Value);
-                parts.Add($"{header.Key}: {value}");
+                parts.Add($"{header.Key}: {string.Join(',', header.Value)}");
             }
         }
 
@@ -147,8 +116,33 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
     }
 
     /// <summary>
-    /// Registra nei log tutti i dettagli utili a diagnosticare una richiesta HTTP fallita:
-    /// metodo, URL, header e body della richiesta e, se disponibile, stato, header e body della risposta.
+    /// Gets the related titles of a movie or show, serving them from the shared in-memory cache
+    /// when possible. Only successful responses are cached (an empty list returned by Trakt is a
+    /// valid response and is cached too), so a failed request is retried on the next call.
+    /// </summary>
+    private async Task<IReadOnlyList<TraktTitleDto>> GetRelatedAsync(string kind, string imdbId, CancellationToken cancellationToken)
+    {
+        var cacheKey = $"trakt-related:{kind}:{imdbId}";
+        if (_memoryCache.TryGetValue(cacheKey, out IReadOnlyList<TraktTitleDto>? cached) && cached is not null)
+        {
+            _logger.LogDebug(Plugin.LogPrefix + "Cache hit for related {Kind} of {ImdbId}", kind, imdbId);
+            return cached;
+        }
+
+        var titles = await SendAsync($"{kind}/{Uri.EscapeDataString(imdbId)}/related", cancellationToken).ConfigureAwait(false);
+        if (titles is null)
+        {
+            return Array.Empty<TraktTitleDto>();
+        }
+
+        var hours = Math.Max(1, Plugin.Instance?.Configuration.CacheHours ?? PluginConfiguration.DefaultCacheHours);
+        _memoryCache.Set(cacheKey, titles, TimeSpan.FromHours(hours));
+        return titles;
+    }
+
+    /// <summary>
+    /// Logs every detail useful to diagnose a failed HTTP request: method, URL, request headers
+    /// and body and, when available, status, response headers and body.
     /// </summary>
     private async Task LogRequestFailureAsync(HttpRequestMessage request, HttpResponseMessage? response, Exception? exception)
     {
@@ -186,8 +180,8 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
     }
 
     /// <summary>
-    /// Registra nei log i dettagli di una richiesta HTTP completata con successo:
-    /// metodo, URL, header e body della richiesta e stato, header e body della risposta.
+    /// Logs the details of an HTTP request that completed successfully: method, URL, request
+    /// headers and body, status, response headers and body.
     /// </summary>
     private async Task LogRequestSuccessAsync(HttpRequestMessage request, HttpResponseMessage response)
     {
@@ -210,7 +204,11 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
             responseBody);
     }
 
-    private async Task<IReadOnlyList<TraktTitleDto>> SendAsync(string relativeUrl, string? accessToken, CancellationToken cancellationToken)
+    /// <summary>
+    /// Sends a GET request to Trakt.
+    /// </summary>
+    /// <returns>The deserialized titles, or <c>null</c> if the request failed.</returns>
+    private async Task<IReadOnlyList<TraktTitleDto>?> SendAsync(string relativeUrl, CancellationToken cancellationToken)
     {
         var client = _httpClientFactory.CreateClient(HttpClientName);
 
@@ -220,13 +218,8 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
             request.Headers.Add("trakt-api-version", "2");
             request.Headers.Add("trakt-api-key", TraktClientId);
 
-            // Trakt sta dietro Cloudflare, che puo' rifiutare con 403 le richieste senza User-Agent.
+            // Trakt is behind Cloudflare, which may reject requests without a User-Agent with a 403.
             request.Headers.UserAgent.ParseAdd(UserAgent);
-
-            if (!string.IsNullOrEmpty(accessToken))
-            {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-            }
 
             HttpResponseMessage? response = null;
             try
@@ -243,7 +236,7 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
                 if (!response.IsSuccessStatusCode)
                 {
                     await LogRequestFailureAsync(request, response, exception: null).ConfigureAwait(false);
-                    return Array.Empty<TraktTitleDto>();
+                    return null;
                 }
 
                 await LogRequestSuccessAsync(request, response).ConfigureAwait(false);
@@ -254,14 +247,14 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                // Annullata dal chiamante (es. l'utente ha lasciato la pagina): non e' un errore.
+                // Cancelled by the caller (e.g. the user left the page): not an error.
                 _logger.LogDebug(Plugin.LogPrefix + "Request cancelled by the caller: {Url}", request.RequestUri);
-                return Array.Empty<TraktTitleDto>();
+                return null;
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
             {
                 await LogRequestFailureAsync(request, response, ex).ConfigureAwait(false);
-                return Array.Empty<TraktTitleDto>();
+                return null;
             }
             finally
             {
@@ -269,6 +262,6 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
             }
         }
 
-        return Array.Empty<TraktTitleDto>();
+        return null;
     }
 }

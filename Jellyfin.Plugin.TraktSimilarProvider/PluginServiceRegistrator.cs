@@ -7,11 +7,11 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Jellyfin.Plugin.TraktSimilarProvider;
 
 /// <summary>
-/// Registra i servizi di supporto del plugin. I fornitori <c>ISimilarItemsProvider</c>
+/// Registers the plugin's supporting services. The <c>ISimilarItemsProvider</c> implementations
 /// (<see cref="Providers.TraktSimilarItemsProvider"/>, <see cref="Providers.TraktSuggestionsProvider"/>)
-/// non vanno registrati qui: Jellyfin li scopre automaticamente scansionando gli assembly
-/// caricati (<c>ApplicationHost.GetExports&lt;ISimilarItemsProvider&gt;()</c>), costruendoli
-/// comunque tramite il container DI — da cui la necessità di registrare qui le loro dipendenze.
+/// must not be registered here: Jellyfin discovers them automatically by scanning the loaded
+/// assemblies (<c>ApplicationHost.GetExports&lt;ISimilarItemsProvider&gt;()</c>), but still builds
+/// them through the DI container, which is why their dependencies are registered here.
 /// </summary>
 public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
 {
@@ -26,7 +26,6 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         });
 
         serviceCollection.AddSingleton<ITraktDiscoveryClient, TraktDiscoveryClient>();
-        serviceCollection.AddSingleton<ITraktPluginBridge, TraktPluginBridge>();
         serviceCollection.AddSingleton<ILocalTitleResolver, LocalTitleResolver>();
     }
 }

@@ -16,9 +16,10 @@ using BaseItem = MediaBrowser.Controller.Entities.BaseItem;
 namespace Jellyfin.Plugin.TraktSimilarProvider.Providers;
 
 /// <summary>
-/// Fornitore nativo "Trakt" per il carosello "Simili", per film e serie, basato
-/// sugli endpoint pubblici <c>/movies|shows/{imdbId}/related</c> di Trakt.tv.
-/// Non richiede un account Trakt collegato: sono dati pubblici, uguali per tutti.
+/// Native "Trakt" provider for the "Similar" carousel, for movies and shows, based on the public
+/// <c>/movies|shows/{imdbId}/related</c> endpoints of Trakt.tv. No Trakt account is required:
+/// the data is public and the same for everyone. Responses are cached by
+/// <see cref="ITraktDiscoveryClient"/>, the same cache used by <see cref="TraktSuggestionsProvider"/>.
 /// </summary>
 public sealed class TraktSimilarItemsProvider : IRemoteSimilarItemsProvider<Movie>, IRemoteSimilarItemsProvider<Series>
 {
@@ -42,15 +43,12 @@ public sealed class TraktSimilarItemsProvider : IRemoteSimilarItemsProvider<Movi
     /// <inheritdoc/>
     public MetadataPluginType Type => MetadataPluginType.SimilarityProvider;
 
-    /// <inheritdoc/>
-    public TimeSpan? CacheDuration
-    {
-        get
-        {
-            var days = Plugin.Instance?.Configuration.SimilarItemsCacheDays ?? 0;
-            return days > 0 ? TimeSpan.FromDays(days) : null;
-        }
-    }
+    /// <summary>
+    /// Gets <c>null</c>: caching is handled by <see cref="ITraktDiscoveryClient"/> and shared with
+    /// the Suggestions provider, so Jellyfin's own on-disk cache is disabled to avoid caching the
+    /// same data twice.
+    /// </summary>
+    public TimeSpan? CacheDuration => null;
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<SimilarItemReference> GetSimilarItemsAsync(

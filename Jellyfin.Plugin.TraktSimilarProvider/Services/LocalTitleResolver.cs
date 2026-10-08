@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using Jellyfin.Data.Enums;
+using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Plugin.TraktSimilarProvider.Dto;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
@@ -24,9 +25,10 @@ public sealed class LocalTitleResolver : ILocalTitleResolver
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<BaseItem> Resolve(IReadOnlyList<TraktTitleDto> titles, BaseItemKind kind, int limit)
+    public IReadOnlyList<BaseItem> Resolve(IReadOnlyList<TraktTitleDto> titles, BaseItemKind kind, int limit, User? user, IReadOnlyCollection<Guid> excludeItemIds)
     {
         var results = new List<BaseItem>(Math.Min(limit, titles.Count));
+        var seenIds = new HashSet<Guid>(excludeItemIds);
 
         foreach (var title in titles)
         {
@@ -41,16 +43,24 @@ public sealed class LocalTitleResolver : ILocalTitleResolver
                 continue;
             }
 
-            var query = new InternalItemsQuery
+            var query = new InternalItemsQuery(user)
             {
                 IncludeItemTypes = [kind],
                 HasAnyProviderId = providerIds,
                 Recursive = true,
-                Limit = 1
+                Limit = 1,
+                EnableGroupByMetadataKey = true,
+                ExcludeItemIds = [.. seenIds]
             };
 
+            if (user is not null)
+            {
+                // Same behavior as the built-in provider: do not suggest what was already watched.
+                query.IsPlayed = false;
+            }
+
             var matches = _libraryManager.GetItemList(query);
-            if (matches.Count > 0)
+            if (matches.Count > 0 && seenIds.Add(matches[0].Id))
             {
                 results.Add(matches[0]);
             }
