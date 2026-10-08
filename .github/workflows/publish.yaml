@@ -8,10 +8,43 @@ on:
 
 jobs:
   build:
-    uses: jellyfin/jellyfin-meta-plugins/.github/workflows/build.yaml@master
-    with:
-      dotnet-version: "10.0.*"
-      dotnet-target: "net10.0"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set version from release tag
+        if: github.event_name == 'release'
+        run: |-
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag '${{ github.event.release.tag_name }}' non valido: usa il formato vX.Y.Z.W (es. v0.1.0.1)"
+            exit 1
+          fi
+          sed -i "s/^version: .*/version: \"$VERSION\"/" build.yaml
+          sed -i -E "s#<(Version|AssemblyVersion|FileVersion)>[^<]*</#<\1>$VERSION</#" Directory.Build.props
+          grep -n "version" build.yaml
+          cat Directory.Build.props
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.*"
+
+      - name: Build Jellyfin Plugin
+        uses: oddstr13/jellyfin-plugin-repository-manager@9497a0a499416cc572ed2e07a391d9f943a37b4d # v1.1.1
+        id: jprm
+        with:
+          dotnet-target: "net10.0"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: build-artifact
+          retention-days: 30
+          if-no-files-found: error
+          path: ${{ steps.jprm.outputs.artifact }}
 
   upload:
     runs-on: ubuntu-latest
