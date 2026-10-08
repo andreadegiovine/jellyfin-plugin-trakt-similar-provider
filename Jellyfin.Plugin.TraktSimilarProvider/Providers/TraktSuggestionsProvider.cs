@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -86,29 +85,30 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
 
         _logger.LogInformation(Plugin.LogPrefix + "Suggestions requested for {Count} source items (limit {Limit})", sourceItems.Count, limit);
 
-        var result = new ConcurrentDictionary<Guid, IReadOnlyList<BaseItem>>();
+        using var gate = new SemaphoreSlim(MaxParallelRequests);
 
-        // Parallel.ForEachAsync gestisce la concorrenza in modo pulito senza passare oggetti IDisposable ai task
-        await Parallel.ForEachAsync(
-            sourceItems,
-            new ParallelOptions
-            {
-                MaxDegreeOfParallelism = MaxParallelRequests,
-                CancellationToken = cancellationToken
-            },
-            async (source, ct) =>
-            {
-                var suggestions = await GetSuggestionsForSourceAsync(source, query, limit, ct).ConfigureAwait(false);
-                result[source.Id] = suggestions;
-            }).ConfigureAwait(false);
+        var tasks = new List<Task<IReadOnlyList<BaseItem>>>(sourceItems.Count);
+        foreach (var source in sourceItems)
+        {
+            tasks.Add(GetSuggestionsForSourceAsync(source, query, limit, gate, cancellationToken));
+        }
 
-        return new Dictionary<Guid, IReadOnlyList<BaseItem>>(result);
+        var lists = await Task.WhenAll(tasks).ConfigureAwait(false);
+
+        var result = new Dictionary<Guid, IReadOnlyList<BaseItem>>(sourceItems.Count);
+        for (var i = 0; i < sourceItems.Count; i++)
+        {
+            result[sourceItems[i].Id] = lists[i];
+        }
+
+        return result;
     }
 
     private async Task<IReadOnlyList<BaseItem>> GetSuggestionsForSourceAsync(
         BaseItem source,
         SimilarItemsQuery query,
         int limit,
+        SemaphoreSlim gate,
         CancellationToken cancellationToken)
     {
         if (source is not (Movie or Series)
@@ -118,6 +118,7 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
             return Array.Empty<BaseItem>();
         }
 
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             var isMovie = source is Movie;
@@ -140,6 +141,10 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
         {
             _logger.LogWarning(ex, Plugin.LogPrefix + "Failed to build Trakt suggestions for {ImdbId}", imdbId);
             return Array.Empty<BaseItem>();
+        }
+        finally
+        {
+            gate.Release();
         }
     }
 }
