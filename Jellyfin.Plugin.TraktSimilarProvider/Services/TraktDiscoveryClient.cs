@@ -185,6 +185,31 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
             responseBody);
     }
 
+    /// <summary>
+    /// Registra nei log i dettagli di una richiesta HTTP completata con successo:
+    /// metodo, URL, header e body della richiesta e stato, header e body della risposta.
+    /// </summary>
+    private async Task LogRequestSuccessAsync(HttpRequestMessage request, HttpResponseMessage response)
+    {
+        var method = request.Method.Method;
+        var url = request.RequestUri?.ToString() ?? "<unknown>";
+        var requestHeaders = FormatHeaders(request.Headers, request.Content?.Headers);
+        var requestBody = await FormatBodyAsync(request.Content).ConfigureAwait(false);
+        var responseHeaders = FormatHeaders(response.Headers, response.Content.Headers);
+        var responseBody = await FormatBodyAsync(response.Content).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            Plugin.LogPrefix + "HTTP request completed with status {StatusCode} {ReasonPhrase}. Method: {Method}; URL: {Url}; Request headers: {RequestHeaders}; Request body: {RequestBody}; Response headers: {ResponseHeaders}; Response body: {ResponseBody}",
+            (int)response.StatusCode,
+            response.ReasonPhrase,
+            method,
+            url,
+            requestHeaders,
+            requestBody,
+            responseHeaders,
+            responseBody);
+    }
+
     private async Task<IReadOnlyList<TraktTitleDto>> SendAsync(string relativeUrl, string? accessToken, CancellationToken cancellationToken)
     {
         var client = _httpClientFactory.CreateClient(HttpClientName);
@@ -220,6 +245,8 @@ public sealed class TraktDiscoveryClient : ITraktDiscoveryClient
                     await LogRequestFailureAsync(request, response, exception: null).ConfigureAwait(false);
                     return Array.Empty<TraktTitleDto>();
                 }
+
+                await LogRequestSuccessAsync(request, response).ConfigureAwait(false);
 
                 using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
                 var result = await JsonSerializer.DeserializeAsync<List<TraktTitleDto>>(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
