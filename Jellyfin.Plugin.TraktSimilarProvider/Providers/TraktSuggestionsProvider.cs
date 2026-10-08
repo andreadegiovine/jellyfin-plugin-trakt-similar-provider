@@ -87,7 +87,7 @@ public sealed class TraktSuggestionsProvider : IBatchLocalSimilarItemsProvider
 
         using var gate = new SemaphoreSlim(MaxParallelRequests);
         var tasks = sourceItems
-            .Select(source => await GetSuggestionsForSourceAsync(source, query, limit, gate, cancellationToken))
+            .Select(source => GetSuggestionsForSourceAsync(source, query, limit, gate, cancellationToken))
             .ToList();
         var lists = await Task.WhenAll(tasks).ConfigureAwait(false);
 
