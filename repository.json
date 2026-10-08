@@ -1,12 +1,20 @@
 [
   {
     "category": "General",
-    "description": "Registra un fornitore \"Trakt\" selezionabile nelle impostazioni di libreria di Jellyfin 12 (Fornitori di elementi simili), accanto a TheMovieDb e Local Genre/Tag, usando gli endpoint pubblici /movies|shows/{id}/related di Trakt.tv per film e serie. Aggiunge inoltre un fornitore di suggerimenti basato su /recommendations/movies e /recommendations/shows, personalizzati in base all'account Trakt collegato tramite il plugin ufficiale \"Trakt\" (da cui dipende). Nessuna libreria virtuale: ogni risultato viene verificato contro la libreria locale prima di essere mostrato.\n",
+    "description": "Registers a \"Trakt\" provider that can be selected in the library settings of Jellyfin 12 (Similar item providers), next to TheMovieDb and Local Genre/Tag, using the public /movies|shows/{id}/related endpoints of Trakt.tv for movies and shows. The same data also feeds the Suggestions tab (\"Because you watched...\" and \"Because you liked...\"). No Trakt account is required. No virtual library is created: every result is checked against the local library before being shown.\n",
     "guid": "a3f1c9d4-7e2b-4a6f-9c1d-5b8e2f0a6c3d",
     "name": "Trakt Similar Provider",
-    "overview": "Aggiunge 'Trakt' come fornitore nativo di elementi simili e suggerimenti, basato sul plugin Trakt ufficiale",
-    "owner": "self-hosted",
+    "overview": "Adds Trakt as a native provider of similar items and suggestions",
+    "owner": "andreadegiovine",
     "versions": [
+      {
+        "changelog": "",
+        "checksum": "f218e17da6ead18a2b482ea0e5737a9e",
+        "sourceUrl": "https://github.com/andreadegiovine/jellyfin-plugin-trakt-similar-provider/releases/download/v0.1.0.6/trakt-similar-provider_0.1.0.6.zip",
+        "targetAbi": "12.0.0.0",
+        "timestamp": "2026-10-08T13:03:10Z",
+        "version": "0.1.0.6"
+      },
       {
         "changelog": "",
         "checksum": "abaa2d71a6fbebfd9ae47027ea4cba0c",
