@@ -46,6 +46,14 @@ jobs:
           if-no-files-found: error
           path: ${{ steps.jprm.outputs.artifact }}
 
+      - name: Upload patched build.yaml
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: build-yaml
+          retention-days: 30
+          if-no-files-found: error
+          path: build.yaml
+
   upload:
     runs-on: ubuntu-latest
     needs:
@@ -69,6 +77,20 @@ jobs:
         with:
           upload_url: ${{ github.event.release.upload_url }}
           asset_path: ./*
+
+      - name: Download patched build.yaml
+        uses: actions/download-artifact@v7
+        with:
+          name: build-yaml
+          path: ${{ runner.temp }}/build-yaml
+
+      # Il generatore del manifest (jellyfin-plugin-repo-action) preferisce un asset
+      # chiamato build.yaml rispetto a quello committato nel tag: da qui prende "version".
+      - name: Upload build.yaml as release asset
+        uses: shogo82148/actions-upload-release-asset@v1.9.2
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ${{ runner.temp }}/build-yaml/build.yaml
 
   generate:
     runs-on: ubuntu-latest
