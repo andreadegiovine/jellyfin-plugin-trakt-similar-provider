@@ -16,15 +16,15 @@ namespace Jellyfin.Plugin.TraktSimilarProvider;
 public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 {
     /// <summary>
+    /// Prefisso anteposto a ogni messaggio di log di questo plugin, per riconoscerlo nei log del server.
+    /// </summary>
+    public const string LogPrefix = "Trakt Similar Provider: ";
+
+    /// <summary>
     /// GUID del plugin ufficiale "Trakt" (jellyfin/jellyfin-plugin-trakt), da cui dipendiamo
     /// per le credenziali dell'account collegato. Verificato dal sorgente ufficiale: Trakt/Plugin.cs.
     /// </summary>
     public static readonly Guid OfficialTraktPluginId = new("4fe3201e-d6ae-4f2e-8917-e12bda571281");
-
-    /// <summary>
-    /// Prefisso anteposto a ogni messaggio di log di questo plugin, per riconoscerlo nei log del server.
-    /// </summary>
-    public const string LogPrefix = "Trakt Similar Provider: ";
 
     /// <summary>
     /// Initializes a new instance of the <see cref="Plugin"/> class.
